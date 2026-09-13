@@ -221,17 +221,16 @@
         } else {
           statusDiv.style.color = "#f87171";
           
-          // ★長い英語エラーを分かりやすい日本語に変換
-          let msg = result.error;
-          if (msg.includes("Quota exceeded") || msg.includes("exceeded your current quota")) {
-            const match = msg.match(/retry in ([\d\.]+)s/);
+          // ★大文字小文字や前後の文字に関係なく確実に日本語化する
+          const errStr = String(result.error || "");
+          if (errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("retry in")) {
+            const match = errStr.match(/retry in\s+([\d\.]+)\s*s/i);
             const sec = match ? Math.ceil(parseFloat(match[1])) : 30;
-            msg = `⏳ AIの利用制限中です。\n約${sec}秒待ってから再開してください。`;
+            statusDiv.textContent = `⏳ AIの利用制限中です。\n約${sec}秒待ってから再開してください。`;
           } else {
-            msg = "エラー: " + msg;
+            statusDiv.textContent = "エラー: " + errStr;
           }
           
-          statusDiv.textContent = msg;
           setPauseState(true);
         }
       } catch (err) {
