@@ -13,7 +13,7 @@
     h2 { margin: 8px 0; font-size: 1.1rem; }
     .box {
       position: relative; width: 100%; max-width: 380px; aspect-ratio: 3/4;
-      border-radius: 16px; overflow: hidden; background: black; cursor: pointer;
+      border-radius: 16px; overflow: hidden; background: black;
     }
     video { width: 100%; height: 100%; object-fit: cover; }
     .guide {
@@ -25,10 +25,7 @@
     .guide.paused { border-color: rgba(239, 68, 68, 0.8); }
     .gauge { width: 80px; height: 80px; opacity: 0; transition: opacity 0.2s; }
     .gauge.active { opacity: 1; }
-    .flash {
-      position: absolute; top:0; left:0; width:100%; height:100%;
-      background: white; opacity: 0; pointer-events: none;
-    }
+    .flash { position: absolute; top:0; left:0; width:100%; height:100%; background: white; opacity: 0; pointer-events: none; }
     .flashing { animation: fl 0.3s ease-out; }
     @keyframes fl { 0% { opacity: 0.9; } 100% { opacity: 0; } }
 
@@ -64,7 +61,7 @@
 <body>
   <h2>🧾 かざすだけ全自動スキャナー</h2>
   
-  <div class="box" id="viewBox" onclick="togglePause()">
+  <div class="box" id="viewBox">
     <video id="video" autoplay playsinline muted></video>
     <div class="guide" id="guide">
       <svg class="gauge" id="gauge" viewBox="0 0 36 36">
@@ -124,7 +121,7 @@
           audio: false
         });
         video.srcObject = stream;
-        statusDiv.textContent = "レシートにかざして手を止めてください\n（画面タップで一時停止できます）";
+        statusDiv.textContent = "レシートにかざして手を止めてください";
         setInterval(checkMotion, 100);
       } catch (err) {
         startBtn.style.display = 'block';
@@ -133,12 +130,11 @@
       }
     }
 
-    function togglePause() {
-      if (!video.srcObject) return;
-      isPaused = !isPaused;
+    function setPauseState(paused) {
+      isPaused = paused;
       steadyTime = 0;
       gauge.classList.remove('active');
-      gaugeProg.setAttribute('stroke-dasharray', `0, 100`);
+      gaugeProg.setAttribute('stroke-dasharray', '0, 100');
 
       if (isPaused) {
         pauseBtn.textContent = "▶️ 自動撮影を再開";
@@ -146,8 +142,6 @@
         statusDot.classList.add('paused');
         badgeText.textContent = "停止中";
         guide.classList.add('paused');
-        statusDiv.style.color = "#f87171";
-        statusDiv.textContent = "⏸️ 自動撮影を一時停止中\n（手動撮影または再開ボタンを押してください）";
       } else {
         pauseBtn.textContent = "⏸️ 一時停止";
         pauseBtn.classList.remove('is-paused');
@@ -156,6 +150,15 @@
         guide.classList.remove('paused');
         statusDiv.style.color = "#38bdf8";
         statusDiv.textContent = "レシートにかざして手を止めてください";
+      }
+    }
+
+    function togglePause() {
+      if (!video.srcObject) return;
+      setPauseState(!isPaused);
+      if (isPaused) {
+        statusDiv.style.color = "#f87171";
+        statusDiv.textContent = "⏸️ 一時停止中（再開ボタンを押してください）";
       }
     }
 
@@ -207,33 +210,35 @@
       const b64 = fCv.toDataURL('image/jpeg', 0.75);
 
       try {
-        // iPhone Safariで確実に通信を通すための設定
         const res = await fetch(GAS_URL, {
           method: 'POST',
           body: JSON.stringify({ image: b64 })
         });
-        
         const result = await res.json();
-
         if (result.success) {
           statusDiv.style.color = "#4ade80";
           statusDiv.textContent = `✅ [${result.store}] 保存完了！`;
         } else {
           statusDiv.style.color = "#f87171";
-          statusDiv.textContent = "❌ " + result.error;
+          statusDiv.textContent = "エラー: " + result.error;
+          // ★エラーが出た場合は暴発連打を防ぐため自動で一時停止モードにする
+          setPauseState(true);
         }
       } catch (err) {
         statusDiv.style.color = "#f87171";
         statusDiv.textContent = "通信エラー: " + err.message;
+        // ★通信エラー時も安全のため一時停止にする
+        setPauseState(true);
       }
 
       setTimeout(() => {
-        steadyTime = 0; isBusy = false;
+        steadyTime = 0;
+        isBusy = false;
         if (!isPaused) {
           statusDiv.style.color = "#38bdf8";
           statusDiv.textContent = "次のレシートにかざして手を止めてください";
         }
-      }, 3000);
+      }, 4000);
     }
   </script>
 </body>
