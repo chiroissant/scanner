@@ -109,6 +109,7 @@
 
     let prevData = null, steadyTime = 0, isBusy = false;
     let isPaused = false;
+    let countdownTimer = null;
     const TARGET = 800, THRESHOLD = 9;
 
     async function initCam() {
@@ -117,7 +118,7 @@
       statusDiv.textContent = "カメラ起動中...";
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false
         });
         video.srcObject = stream;
@@ -143,6 +144,10 @@
         badgeText.textContent = "停止中";
         guide.classList.add('paused');
       } else {
+        if (countdownTimer) {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+        }
         pauseBtn.textContent = "⏸️ 一時停止";
         pauseBtn.classList.remove('is-paused');
         statusDot.classList.remove('paused');
@@ -155,6 +160,10 @@
 
     function togglePause() {
       if (!video.srcObject) return;
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
       setPauseState(!isPaused);
       if (isPaused) {
         statusDiv.style.color = "#f87171";
@@ -162,8 +171,29 @@
       }
     }
 
+    function startCooldownTimer(sec) {
+      setPauseState(true);
+      if (countdownTimer) clearInterval(countdownTimer);
+      let remain = sec;
+      statusDiv.style.color = "#f87171";
+      statusDiv.innerHTML = `⏳ AIの利用枠回復待ちです<br><span style="font-size:1.2rem;color:#facc15;">あと ${remain} 秒</span> で自動再開します`;
+
+      countdownTimer = setInterval(() => {
+        remain--;
+        if (remain > 0) {
+          statusDiv.innerHTML = `⏳ AIの利用枠回復待ちです<br><span style="font-size:1.2rem;color:#facc15;">あと ${remain} 秒</span> で自動再開します`;
+        } else {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+          setPauseState(false);
+          statusDiv.style.color = "#4ade80";
+          statusDiv.textContent = "✨ 回復しました！手を止めて撮影してください";
+        }
+      }, 1000);
+    }
+
     function checkMotion() {
-      if (isBusy || isPaused || !video.videoWidth) return;
+      if (isBusy || isPaused || countdownTimer || !video.videoWidth) return;
       mCtx.drawImage(video, 0, 0, 64, 64);
       const curr = mCtx.getImageData(0, 0, 64, 64).data;
       if (prevData) {
@@ -186,12 +216,12 @@
     }
 
     function forceCapture() {
-      if (isBusy || !video.videoWidth) return;
+      if (isBusy || countdownTimer || !video.videoWidth) return;
       capture();
     }
 
     async function capture() {
-      if (isBusy) return;
+      if (isBusy || countdownTimer) return;
       isBusy = true;
       flash.classList.add('flashing');
       setTimeout(() => flash.classList.remove('flashing'), 300);
@@ -201,13 +231,14 @@
       statusDiv.style.color = "#eab308";
       statusDiv.textContent = "⚡ AI解析＆スプシ保存中...";
 
+      // ★軽量化：画像サイズを最大750px、品質0.55に圧縮（無料枠のデータ上限を消費しない設定）
       let w = video.videoWidth, h = video.videoHeight;
-      const max = 1200;
+      const max = 750;
       if (w > h && w > max) { h = Math.round(h * max / w); w = max; }
       else if (h > max) { w = Math.round(w * max / h); h = max; }
       fCv.width = w; fCv.height = h;
       fCv.getContext('2d').drawImage(video, 0, 0, w, h);
-      const b64 = fCv.toDataURL('image/jpeg', 0.75);
+      const b64 = fCv.toDataURL('image/jpeg', 0.55);
 
       try {
         const res = await fetch(GAS_URL, {
@@ -219,19 +250,16 @@
           statusDiv.style.color = "#4ade80";
           statusDiv.textContent = `✅ [${result.store}] 保存完了！`;
         } else {
-          statusDiv.style.color = "#f87171";
-          
-          // ★大文字小文字や前後の文字に関係なく確実に日本語化する
           const errStr = String(result.error || "");
           if (errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("retry in")) {
             const match = errStr.match(/retry in\s+([\d\.]+)\s*s/i);
-            const sec = match ? Math.ceil(parseFloat(match[1])) : 30;
-            statusDiv.textContent = `⏳ AIの利用制限中です。\n約${sec}秒待ってから再開してください。`;
+            const sec = match ? Math.ceil(parseFloat(match[1])) : 35;
+            startCooldownTimer(sec);
           } else {
+            statusDiv.style.color = "#f87171";
             statusDiv.textContent = "エラー: " + errStr;
+            setPauseState(true);
           }
-          
-          setPauseState(true);
         }
       } catch (err) {
         statusDiv.style.color = "#f87171";
@@ -242,11 +270,11 @@
       setTimeout(() => {
         steadyTime = 0;
         isBusy = false;
-        if (!isPaused) {
+        if (!isPaused && !countdownTimer) {
           statusDiv.style.color = "#38bdf8";
           statusDiv.textContent = "次のレシートにかざして手を止めてください";
         }
-      }, 4000);
+      }, 3000);
     }
   </script>
 </body>
