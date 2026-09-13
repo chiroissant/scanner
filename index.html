@@ -220,14 +220,23 @@
           statusDiv.textContent = `✅ [${result.store}] 保存完了！`;
         } else {
           statusDiv.style.color = "#f87171";
-          statusDiv.textContent = "エラー: " + result.error;
-          // ★エラーが出た場合は暴発連打を防ぐため自動で一時停止モードにする
+          
+          // ★長い英語エラーを分かりやすい日本語に変換
+          let msg = result.error;
+          if (msg.includes("Quota exceeded") || msg.includes("exceeded your current quota")) {
+            const match = msg.match(/retry in ([\d\.]+)s/);
+            const sec = match ? Math.ceil(parseFloat(match[1])) : 30;
+            msg = `⏳ AIの利用制限中です。\n約${sec}秒待ってから再開してください。`;
+          } else {
+            msg = "エラー: " + msg;
+          }
+          
+          statusDiv.textContent = msg;
           setPauseState(true);
         }
       } catch (err) {
         statusDiv.style.color = "#f87171";
         statusDiv.textContent = "通信エラー: " + err.message;
-        // ★通信エラー時も安全のため一時停止にする
         setPauseState(true);
       }
 
