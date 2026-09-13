@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>レシート全自動スキャナー</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px; font-family: -apple-system, sans-serif;
+      background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center;
+    }
+    h2 { margin: 8px 0; font-size: 1.1rem; }
+    .box {
+      position: relative; width: 100%; max-width: 380px; aspect-ratio: 3/4;
+      border-radius: 16px; overflow: hidden; background: black;
+    }
+    video { width: 100%; height: 100%; object-fit: cover; }
+    .guide {
+      position: absolute; top: 10%; left: 10%; right: 10%; bottom: 10%;
+      border: 2px dashed rgba(255,255,255,0.7); border-radius: 12px;
+      box-shadow: 0 0 0 2000px rgba(0,0,0,0.45); pointer-events: none;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .gauge {
+      width: 80px; height: 80px; opacity: 0; transition: opacity 0.2s;
+    }
+    .gauge.active { opacity: 1; }
+    .flash {
+      position: absolute; top:0; left:0; width:100%; height:100%;
+      background: white; opacity: 0; pointer-events: none;
+    }
+    .flashing { animation: fl 0.3s ease-out; }
+    @keyframes fl { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+    #status {
+      margin-top: 16px; font-size: 1rem; font-weight: bold; min-height: 1.5em; text-align: center; color: #38bdf8;
+    }
+    .start-btn {
+      width: 100%; max-width: 380px; padding: 14px; margin-top: 12px;
+      background: #2563eb; color: white; border: none; border-radius: 24px; font-size: 1rem; font-weight: bold; cursor: pointer;
+    }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h2>🧾 かざすだけ全自動スキャナー</h2>
+  <div class="box">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="guide">
+      <svg class="gauge" id="gauge" viewBox="0 0 36 36">
+        <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="3" />
+        <path id="gaugeProg" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" />
+      </svg>
+    </div>
+    <div class="flash" id="flash"></div>
+  </div>
+
+  <div id="status">ボタンを押してスキャナーを起動</div>
+  <button class="start-btn" id="startBtn" onclick="initCam()">📹 スキャナーを起動</button>
+
+  <canvas id="motionCv" width="64" height="64"></canvas>
+  <canvas id="fullCv"></canvas>
+
+  <script>
+    // ★★★ ステップ1で取得したGASのURLをここに貼り付けてください ★★★
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbwuNSKwjLcsbk6tUC1gSIA8WzmxytOxWw4qmYFDBQf4TiNfINRPjyLV1ahASxzBE8tQ4g/exec";
+
+    const video = document.getElementById('video');
+    const statusDiv = document.getElementById('status');
+    const flash = document.getElementById('flash');
+    const gauge = document.getElementById('gauge');
+    const gaugeProg = document.getElementById('gaugeProg');
+    const startBtn = document.getElementById('startBtn');
+    const mCv = document.getElementById('motionCv');
+    const mCtx = mCv.getContext('2d', { willReadFrequently: true });
+    const fCv = document.getElementById('fullCv');
+
+    let prevData = null, steadyTime = 0, isBusy = false;
+    const TARGET = 800, THRESHOLD = 9;
+
+    async function initCam() {
+      startBtn.style.display = 'none';
+      statusDiv.textContent = "カメラ起動中...";
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        statusDiv.textContent = "レシートにかざして手を止めてください";
+        setInterval(checkMotion, 100);
+      } catch (err) {
+        startBtn.style.display = 'block';
+        statusDiv.textContent = "カメラエラー: " + err.message;
+      }
+    }
+
+    function checkMotion() {
+      if (isBusy || !video.videoWidth) return;
+      mCtx.drawImage(video, 0, 0, 64, 64);
+      const curr = mCtx.getImageData(0, 0, 64, 64).data;
+      if (prevData) {
+        let diff = 0;
+        for (let i = 0; i < curr.length; i += 4) diff += Math.abs(curr[i] - prevData[i]);
+        const avg = diff / (64 * 64);
+
+        if (avg < THRESHOLD) {
+          steadyTime += 100;
+          gauge.classList.add('active');
+          gaugeProg.setAttribute('stroke-dasharray', `${Math.min(100, Math.round(steadyTime / TARGET * 100))}, 100`);
+          if (steadyTime >= TARGET) capture();
+        } else {
+          steadyTime = 0;
+          gauge.classList.remove('active');
+          gaugeProg.setAttribute('stroke-dasharray', `0, 100`);
+        }
+      }
+      prevData = curr;
+    }
+
+    async function capture() {
+      if (isBusy) return;
+      isBusy = true;
+      flash.classList.add('flashing');
+      setTimeout(() => flash.classList.remove('flashing'), 300);
+      if (navigator.vibrate) navigator.vibrate(100);
+
+      gauge.classList.remove('active');
+      statusDiv.style.color = "#eab308";
+      statusDiv.textContent = "⚡ AI解析＆スプシ保存中...";
+
+      let w = video.videoWidth, h = video.videoHeight;
+      const max = 1200;
+      if (w > h && w > max) { h = Math.round(h * max / w); w = max; }
+      else if (h > max) { w = Math.round(w * max / h); h = max; }
+      fCv.width = w; fCv.height = h;
+      fCv.getContext('2d').drawImage(video, 0, 0, w, h);
+      const b64 = fCv.toDataURL('image/jpeg', 0.75);
+
+      try {
+        const res = await fetch(GAS_URL, {
+          method: 'POST',
+          body: JSON.stringify({ image: b64 })
+        });
+        const result = await res.json();
+        if (result.success) {
+          statusDiv.style.color = "#4ade80";
+          statusDiv.textContent = `✅ [${result.store}] 保存完了！次のレシートへ`;
+        } else {
+          statusDiv.style.color = "#f87171";
+          statusDiv.textContent = "❌ " + result.error;
+        }
+      } catch (err) {
+        statusDiv.style.color = "#f87171";
+        statusDiv.textContent = "通信エラー: " + err.message;
+      }
+      setTimeout(() => {
+        steadyTime = 0; isBusy = false;
+        statusDiv.style.color = "#38bdf8";
+        statusDiv.textContent = "レシートにかざして手を止めてください";
+      }, 2500);
+    }
+  </script>
+</body>
+</html>
