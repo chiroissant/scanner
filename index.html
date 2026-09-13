@@ -22,12 +22,8 @@
       box-shadow: 0 0 0 2000px rgba(0,0,0,0.45); pointer-events: none;
       display: flex; align-items: center; justify-content: center;
     }
-    .guide.paused {
-      border-color: rgba(239, 68, 68, 0.8);
-    }
-    .gauge {
-      width: 80px; height: 80px; opacity: 0; transition: opacity 0.2s;
-    }
+    .guide.paused { border-color: rgba(239, 68, 68, 0.8); }
+    .gauge { width: 80px; height: 80px; opacity: 0; transition: opacity 0.2s; }
     .gauge.active { opacity: 1; }
     .flash {
       position: absolute; top:0; left:0; width:100%; height:100%;
@@ -96,7 +92,7 @@
   <canvas id="fullCv"></canvas>
 
   <script>
-    // ★★★ あなたのGASのURLが入っていることを確認してください ★★★
+    // ★★★ あなたのGASのURLを貼り付けてください ★★★
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwuNSKwjLcsbk6tUC1gSIA8WzmxytOxWw4qmYFDBQf4TiNfINRPjyLV1ahASxzBE8tQ4g/exec";
 
     const video = document.getElementById('video');
@@ -211,22 +207,13 @@
       const b64 = fCv.toDataURL('image/jpeg', 0.75);
 
       try {
+        // iPhone Safariで確実に通信を通すための設定
         const res = await fetch(GAS_URL, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8'
-          },
-          body: JSON.stringify({ image: b64 }),
-          redirect: 'follow'
+          body: JSON.stringify({ image: b64 })
         });
         
-        const text = await res.text();
-        let result;
-        try {
-          result = JSON.parse(text);
-        } catch (e) {
-          throw new Error("応答解析失敗: " + text.substring(0, 50));
-        }
+        const result = await res.json();
 
         if (result.success) {
           statusDiv.style.color = "#4ade80";
