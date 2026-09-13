@@ -13,7 +13,7 @@
     h2 { margin: 8px 0; font-size: 1.1rem; }
     .box {
       position: relative; width: 100%; max-width: 380px; aspect-ratio: 3/4;
-      border-radius: 16px; overflow: hidden; background: black;
+      border-radius: 16px; overflow: hidden; background: black; cursor: pointer;
     }
     video { width: 100%; height: 100%; object-fit: cover; }
     .guide {
@@ -21,6 +21,9 @@
       border: 2px dashed rgba(255,255,255,0.7); border-radius: 12px;
       box-shadow: 0 0 0 2000px rgba(0,0,0,0.45); pointer-events: none;
       display: flex; align-items: center; justify-content: center;
+    }
+    .guide.paused {
+      border-color: rgba(239, 68, 68, 0.8);
     }
     .gauge {
       width: 80px; height: 80px; opacity: 0; transition: opacity 0.2s;
@@ -32,37 +35,68 @@
     }
     .flashing { animation: fl 0.3s ease-out; }
     @keyframes fl { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+
+    .pause-badge {
+      position: absolute; top: 12px; right: 12px;
+      background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 20px;
+      font-size: 0.85rem; font-weight: bold; border: 1px solid rgba(255,255,255,0.3);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+    .dot.paused { background: #ef4444; }
+
     #status {
-      margin-top: 16px; font-size: 1rem; font-weight: bold; min-height: 1.5em; text-align: center; color: #38bdf8;
+      margin-top: 14px; font-size: 0.95rem; font-weight: bold; min-height: 2.8em;
+      text-align: center; color: #38bdf8; line-height: 1.4; padding: 0 8px;
     }
-    .start-btn {
-      width: 100%; max-width: 380px; padding: 14px; margin-top: 12px;
-      background: #2563eb; color: white; border: none; border-radius: 24px; font-size: 1rem; font-weight: bold; cursor: pointer;
+    
+    .btn-group {
+      display: flex; gap: 10px; width: 100%; max-width: 380px; margin-top: 10px;
     }
+    .btn {
+      flex: 1; padding: 14px; border: none; border-radius: 24px;
+      font-size: 0.95rem; font-weight: bold; cursor: pointer; transition: 0.2s;
+    }
+    .start-btn { background: #2563eb; color: white; width: 100%; max-width: 380px; }
+    .toggle-pause-btn { background: #334155; color: white; border: 1px solid #475569; }
+    .toggle-pause-btn.is-paused { background: #16a34a; }
+    .manual-btn { background: #0284c7; color: white; }
+
     canvas { display: none; }
   </style>
 </head>
 <body>
   <h2>🧾 かざすだけ全自動スキャナー</h2>
-  <div class="box">
+  
+  <div class="box" id="viewBox" onclick="togglePause()">
     <video id="video" autoplay playsinline muted></video>
-    <div class="guide">
+    <div class="guide" id="guide">
       <svg class="gauge" id="gauge" viewBox="0 0 36 36">
         <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="3" />
         <path id="gaugeProg" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" />
       </svg>
     </div>
+    <div class="pause-badge">
+      <span class="dot" id="statusDot"></span>
+      <span id="badgeText">監視中</span>
+    </div>
     <div class="flash" id="flash"></div>
   </div>
 
-  <div id="status">ボタンを押してスキャナーを起動</div>
-  <button class="start-btn" id="startBtn" onclick="initCam()">📹 スキャナーを起動</button>
+  <div id="status">下のボタンを押してスキャナーを起動</div>
+  
+  <button class="btn start-btn" id="startBtn" onclick="initCam()">📹 スキャナーを起動</button>
+  
+  <div class="btn-group" id="ctrlGroup" style="display: none;">
+    <button class="btn toggle-pause-btn" id="pauseBtn" onclick="togglePause()">⏸️ 一時停止</button>
+    <button class="btn manual-btn" id="manualBtn" onclick="forceCapture()">📸 今すぐ撮影</button>
+  </div>
 
   <canvas id="motionCv" width="64" height="64"></canvas>
   <canvas id="fullCv"></canvas>
 
   <script>
-    // ★★★ ステップ1で取得したGASのURLをここに貼り付けてください ★★★
+    // ★★★ あなたのGASのURLを貼り付けてください ★★★
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwuNSKwjLcsbk6tUC1gSIA8WzmxytOxWw4qmYFDBQf4TiNfINRPjyLV1ahASxzBE8tQ4g/exec";
 
     const video = document.getElementById('video');
@@ -70,16 +104,23 @@
     const flash = document.getElementById('flash');
     const gauge = document.getElementById('gauge');
     const gaugeProg = document.getElementById('gaugeProg');
+    const guide = document.getElementById('guide');
     const startBtn = document.getElementById('startBtn');
+    const ctrlGroup = document.getElementById('ctrlGroup');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const statusDot = document.getElementById('statusDot');
+    const badgeText = document.getElementById('badgeText');
     const mCv = document.getElementById('motionCv');
     const mCtx = mCv.getContext('2d', { willReadFrequently: true });
     const fCv = document.getElementById('fullCv');
 
     let prevData = null, steadyTime = 0, isBusy = false;
+    let isPaused = false;
     const TARGET = 800, THRESHOLD = 9;
 
     async function initCam() {
       startBtn.style.display = 'none';
+      ctrlGroup.style.display = 'flex';
       statusDiv.textContent = "カメラ起動中...";
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -87,16 +128,43 @@
           audio: false
         });
         video.srcObject = stream;
-        statusDiv.textContent = "レシートにかざして手を止めてください";
+        statusDiv.textContent = "レシートにかざして手を止めてください\n（画面タップで一時停止できます）";
         setInterval(checkMotion, 100);
       } catch (err) {
         startBtn.style.display = 'block';
+        ctrlGroup.style.display = 'none';
         statusDiv.textContent = "カメラエラー: " + err.message;
       }
     }
 
+    function togglePause() {
+      if (!video.srcObject) return;
+      isPaused = !isPaused;
+      steadyTime = 0;
+      gauge.classList.remove('active');
+      gaugeProg.setAttribute('stroke-dasharray', `0, 100`);
+
+      if (isPaused) {
+        pauseBtn.textContent = "▶️ 自動撮影を再開";
+        pauseBtn.classList.add('is-paused');
+        statusDot.classList.add('paused');
+        badgeText.textContent = "停止中";
+        guide.classList.add('paused');
+        statusDiv.style.color = "#f87171";
+        statusDiv.textContent = "⏸️ 自動撮影を一時停止中\n（手動撮影または再開ボタンを押してください）";
+      } else {
+        pauseBtn.textContent = "⏸️ 一時停止";
+        pauseBtn.classList.remove('is-paused');
+        statusDot.classList.remove('paused');
+        badgeText.textContent = "監視中";
+        guide.classList.remove('paused');
+        statusDiv.style.color = "#38bdf8";
+        statusDiv.textContent = "レシートにかざして手を止めてください";
+      }
+    }
+
     function checkMotion() {
-      if (isBusy || !video.videoWidth) return;
+      if (isBusy || isPaused || !video.videoWidth) return;
       mCtx.drawImage(video, 0, 0, 64, 64);
       const curr = mCtx.getImageData(0, 0, 64, 64).data;
       if (prevData) {
@@ -116,6 +184,11 @@
         }
       }
       prevData = curr;
+    }
+
+    function forceCapture() {
+      if (isBusy || !video.videoWidth) return;
+      capture();
     }
 
     async function capture() {
@@ -145,7 +218,7 @@
         const result = await res.json();
         if (result.success) {
           statusDiv.style.color = "#4ade80";
-          statusDiv.textContent = `✅ [${result.store}] 保存完了！次のレシートへ`;
+          statusDiv.textContent = `✅ [${result.store}] 保存完了！`;
         } else {
           statusDiv.style.color = "#f87171";
           statusDiv.textContent = "❌ " + result.error;
@@ -154,11 +227,15 @@
         statusDiv.style.color = "#f87171";
         statusDiv.textContent = "通信エラー: " + err.message;
       }
+
+      // レートリミット防止のため少し待ってから復帰
       setTimeout(() => {
         steadyTime = 0; isBusy = false;
-        statusDiv.style.color = "#38bdf8";
-        statusDiv.textContent = "レシートにかざして手を止めてください";
-      }, 2500);
+        if (!isPaused) {
+          statusDiv.style.color = "#38bdf8";
+          statusDiv.textContent = "次のレシートにかざして手を止めてください";
+        }
+      }, 3000);
     }
   </script>
 </body>
